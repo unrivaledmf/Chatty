@@ -61,7 +61,7 @@ export default function ChatArea() {
       socket.off('newMessage', handleNewMessage);
       socket.emit('leaveChat', chatId);
     };
-  }, [chatId, currentUser]);
+  }, [chatId, currentUser?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -127,7 +127,6 @@ export default function ChatArea() {
                 key={msg.id}
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                layout
                 className={cn(
                   "flex w-full",
                   isMe ? "justify-end" : "justify-start"
@@ -156,7 +155,7 @@ export default function ChatArea() {
             type="text"
             value={text}
             onChange={e => setText(e.target.value)}
-            placeholder="iMessage-style text..."
+            placeholder="Type a message..."
             className="flex-1 bg-transparent border-none text-white focus:outline-none py-2 text-sm placeholder-white/40"
           />
           <button 

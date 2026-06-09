@@ -27,7 +27,9 @@ export default function Dashboard() {
     fetch(`/api/users/${currentUser.id}`)
       .then(res => res.json())
       .then(user => {
-        if (user) setCurrentUser(user);
+        if (user && JSON.stringify(user) !== JSON.stringify(currentUser)) {
+            setCurrentUser(user);
+        }
       })
       .catch(console.error);
 
@@ -55,21 +57,30 @@ export default function Dashboard() {
 
     return () => {
       socket.off('chatUpdated', handleChatUpdated);
-      socket.disconnect();
     };
-  }, [currentUser, navigate]);
+  }, [currentUser?.id, navigate]);
 
   useEffect(() => {
     const handleNotification = (data: { chatId: string, senderId: string, text: string }) => {
         // Find if we are currently looking at this chat
         const currentPath = window.location.pathname;
-        if (currentPath === `/chat/${data.chatId}`) {
+        if (currentPath.includes(`/chat/${data.chatId}`)) {
             return; // Already viewing this chat
         }
         
-        // Show toast
+        let senderName = 'Someone';
         const sender = useAppStore.getState().usersCache[data.senderId];
-        const senderName = sender ? sender.username : 'Someone';
+        if (sender) {
+            senderName = sender.username;
+        } else {
+            // Fetch missing user cache and update store just in case
+            fetch(`/api/users/${data.senderId}`)
+              .then(r => r.json())
+              .then(u => {
+                 if (u) useAppStore.getState().addUserToCache(u);
+              }).catch(console.error);
+        }
+
         const id = Date.now().toString();
         setToastMessage({
             id,
