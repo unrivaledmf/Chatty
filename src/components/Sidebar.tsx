@@ -141,10 +141,10 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
 
       <div className="flex-1 overflow-y-auto relative px-3 z-10 flex flex-col space-y-1">
         {isSearching ? (
-          <div className="absolute inset-0 bg-transparent z-10 p-2">
+          <div className="flex flex-col z-10 p-2">
             <h3 className="px-4 py-2 text-xs font-semibold text-white/50 uppercase tracking-wide">Global Search</h3>
             {searchResults.length === 0 ? (
-                <div className="p-8 text-center text-white/60">No users found</div>
+                <div className="p-8 text-center text-white/60">No users found or loading...</div>
             ) : (
                 searchResults.map(user => {
                     const isContact = currentUser?.contacts?.includes(user.id);
