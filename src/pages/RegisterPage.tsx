@@ -52,7 +52,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-tr from-sky-400 via-indigo-400 to-purple-500 p-4 font-sans">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-tr from-gray-950 via-slate-900 to-zinc-950 p-4 font-sans">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}

@@ -35,15 +35,18 @@ export default function ChatArea() {
           if (otherId && !usersCache[otherId]) {
             fetch(`/api/users/${otherId}`)
               .then(r => r.json())
-              .then(u => addUserToCache(u));
+              .then(u => addUserToCache(u))
+              .catch(console.error);
           }
         }
-      });
+      })
+      .catch(console.error);
 
     // Fetch initial messages
     fetch(`/api/chats/${chatId}/messages`)
       .then(res => res.json())
-      .then(setMessages);
+      .then(setMessages)
+      .catch(console.error);
 
     const handleNewMessage = (msg: Message) => {
       setMessages(prev => {
@@ -69,7 +72,18 @@ export default function ChatArea() {
     if (!text.trim() || !chatId || !currentUser) return;
     
     // Optimistic / send
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      chatId,
+      senderId: currentUser.id,
+      text: text.trim(),
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    
     socket.emit('sendMessage', {
+      id: tempId,
       chatId,
       senderId: currentUser.id,
       text: text.trim(),
@@ -82,7 +96,7 @@ export default function ChatArea() {
   const otherUser = otherId ? usersCache[otherId] : null;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-transparent relative z-20">
+    <div className="flex-1 flex flex-col h-full w-full bg-transparent relative z-20">
       <div className="p-4 border-b border-white/10 flex items-center gap-4 bg-white/5 backdrop-blur-sm sticky top-0 z-10 shrink-0">
         <button onClick={() => navigate('/')} className="lg:hidden p-2 -ml-2 rounded-full hover:bg-white/10 text-white">
           <ArrowLeft className="w-5 h-5" />
@@ -90,7 +104,7 @@ export default function ChatArea() {
         {otherUser ? (
           <>
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-white font-bold tracking-tight text-sm">
-              {otherUser.username.charAt(0).toUpperCase()}
+              {otherUser.username?.charAt(0)?.toUpperCase() || '?'}
             </div>
             <div>
               <h2 className="font-semibold text-white leading-tight">{otherUser.username}</h2>

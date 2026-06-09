@@ -1,5 +1,4 @@
-// In-memory or simple disk-persisted datastore
-import fs from 'fs';
+import Database from 'better-sqlite3';
 import path from 'path';
 
 export interface User {
@@ -32,166 +31,251 @@ export interface Chat {
 }
 
 export class Storage {
-  users: Map<string, User> = new Map();
-  usernamesMap: Map<string, string> = new Map(); // username -> userId
-  chats: Map<string, Chat> = new Map();
-  messages: Map<string, Message> = new Map(); // messageId -> Message
-  contactRequests: Map<string, ContactRequest> = new Map();
+  private db: Database.Database;
 
-  // Load from disk if available
   constructor() {
-    this.load();
+    this.db = new Database(path.join(process.cwd(), 'chat_app.sqlite'));
+    this.init();
   }
 
-  private getFilePath() {
-    return path.join(process.cwd(), 'db.json');
+  private init() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE
+      );
+
+      CREATE TABLE IF NOT EXISTS contacts (
+        user_id TEXT,
+        contact_id TEXT,
+        PRIMARY KEY (user_id, contact_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS chats (
+        id TEXT PRIMARY KEY,
+        last_message TEXT,
+        updated_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_participants (
+        chat_id TEXT,
+        user_id TEXT,
+        PRIMARY KEY (chat_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        chat_id TEXT,
+        sender_id TEXT,
+        text TEXT,
+        timestamp INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS contact_requests (
+        id TEXT PRIMARY KEY,
+        sender_id TEXT,
+        receiver_id TEXT,
+        status TEXT,
+        timestamp INTEGER
+      );
+    `);
   }
 
-  save() {
-    try {
-      const data = {
-        users: Array.from(this.users.entries()),
-        usernamesMap: Array.from(this.usernamesMap.entries()),
-        chats: Array.from(this.chats.entries()),
-        messages: Array.from(this.messages.entries()),
-        contactRequests: Array.from(this.contactRequests.entries()),
-      };
-      fs.writeFileSync(this.getFilePath(), JSON.stringify(data));
-    } catch (e) {
-      console.error("Failed to save DB:", e);
-    }
-  }
-
-  load() {
-    try {
-      if (fs.existsSync(this.getFilePath())) {
-        const data = JSON.parse(fs.readFileSync(this.getFilePath(), 'utf-8'));
-        this.users = new Map(data.users);
-        this.usernamesMap = new Map(data.usernamesMap);
-        this.chats = new Map(data.chats);
-        this.messages = new Map(data.messages);
-        if (data.contactRequests) this.contactRequests = new Map(data.contactRequests);
-      }
-    } catch (e) {
-        console.error("Failed to load DB:", e);
-    }
-  }
-
-  // API
-
+  // --- API ---
   createUser(id: string, username: string): User | null {
-    if (this.usernamesMap.has(username)) return null;
-    const user = { id, username, contacts: [] };
-    this.users.set(id, user);
-    this.usernamesMap.set(username, id);
-    this.save();
-    return user;
+    try {
+      this.db.prepare('INSERT INTO users (id, username) VALUES (?, ?)').run(id, username);
+      return { id, username, contacts: [] };
+    } catch {
+      return null;
+    }
   }
 
   getUser(id: string): User | undefined {
-    return this.users.get(id);
+    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
+    if (!user) return undefined;
+    const contacts = this.db.prepare('SELECT contact_id FROM contacts WHERE user_id = ?').all(id) as any[];
+    return { id: user.id, username: user.username, contacts: contacts.map(c => c.contact_id) };
   }
 
   getUserByUsername(username: string): User | undefined {
-    const id = this.usernamesMap.get(username);
-    if (!id) return undefined;
-    return this.users.get(id);
+    const user = this.db.prepare('SELECT id FROM users WHERE username = ?').get(username) as any;
+    if (!user) return undefined;
+    return this.getUser(user.id);
   }
-  
+
   getSearchUsers(query: string, excludeId: string): User[] {
-    const results: User[] = [];
-    for (const user of this.users.values()) {
-        if (user.id !== excludeId && user.username.toLowerCase().includes(query.toLowerCase())) {
-            results.push(user);
-        }
-    }
-    return results;
-  }
-
-  createChat(id: string, participants: string[]): Chat {
-    const chat = { id, participants, updatedAt: Date.now() };
-    this.chats.set(id, chat);
-    this.save();
-    return chat;
-  }
-
-  getChat(id: string): Chat | undefined {
-    return this.chats.get(id);
-  }
-
-  getUserChats(userId: string): Chat[] {
-    return Array.from(this.chats.values()).filter(c => c.participants.includes(userId));
-  }
-  
-  getChatByParticipants(participants: string[]): Chat | undefined {
-    return Array.from(this.chats.values()).find(c => {
-      return c.participants.length === participants.length && 
-             participants.every(p => c.participants.includes(p));
+    const users = this.db.prepare('SELECT * FROM users WHERE id != ? AND username LIKE ? LIMIT 50')
+      .all(excludeId, `%${query}%`) as any[];
+    
+    return users.map(u => {
+      const contacts = this.db.prepare('SELECT contact_id FROM contacts WHERE user_id = ?').all(u.id) as any[];
+      return { id: u.id, username: u.username, contacts: contacts.map(c => c.contact_id) };
     });
   }
 
+  createChat(id: string, participants: string[]): Chat {
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('INSERT INTO chats (id, updated_at) VALUES (?, ?)').run(id, Date.now());
+      const insertParticipant = this.db.prepare('INSERT INTO chat_participants (chat_id, user_id) VALUES (?, ?)');
+      for (const p of participants) {
+        insertParticipant.run(id, p);
+      }
+    });
+    transaction();
+    return { id, participants, updatedAt: Date.now() };
+  }
+
+  getChat(id: string): Chat | undefined {
+    const chatRow = this.db.prepare('SELECT * FROM chats WHERE id = ?').get(id) as any;
+    if (!chatRow) return undefined;
+    
+    const participants = this.db.prepare('SELECT user_id FROM chat_participants WHERE chat_id = ?').all(id) as any[];
+    return {
+      id: chatRow.id,
+      lastMessage: chatRow.last_message || undefined,
+      updatedAt: chatRow.updated_at,
+      participants: participants.map(p => p.user_id)
+    };
+  }
+
+  getUserChats(userId: string): Chat[] {
+    const chatRows = this.db.prepare(`
+      SELECT c.* FROM chats c
+      JOIN chat_participants cp ON c.id = cp.chat_id
+      WHERE cp.user_id = ?
+      ORDER BY c.updated_at DESC
+    `).all(userId) as any[];
+
+    return chatRows.map(row => {
+      const participants = this.db.prepare('SELECT user_id FROM chat_participants WHERE chat_id = ?').all(row.id) as any[];
+      return {
+        id: row.id,
+        lastMessage: row.last_message || undefined,
+        updatedAt: row.updated_at,
+        participants: participants.map(p => p.user_id)
+      };
+    });
+  }
+
+  getChatByParticipants(participants: string[]): Chat | undefined {
+    if (participants.length === 0) return undefined;
+    const chats = this.getUserChats(participants[0]);
+    return chats.find(c => 
+      c.participants.length === participants.length && 
+      participants.every(p => c.participants.includes(p))
+    );
+  }
+
   addMessage(msg: Message) {
-    this.messages.set(msg.id, msg);
-    const chat = this.chats.get(msg.chatId);
-    if (chat) {
-      chat.lastMessage = msg.text;
-      chat.updatedAt = msg.timestamp;
-    }
-    this.save();
+    const transaction = this.db.transaction(() => {
+      this.db.prepare(
+        'INSERT INTO messages (id, chat_id, sender_id, text, timestamp) VALUES (?, ?, ?, ?, ?)'
+      ).run(msg.id, msg.chatId, msg.senderId, msg.text, msg.timestamp);
+      
+      this.db.prepare(
+        'UPDATE chats SET last_message = ?, updated_at = ? WHERE id = ?'
+      ).run(msg.text, msg.timestamp, msg.chatId);
+    });
+    transaction();
   }
 
   getChatMessages(chatId: string): Message[] {
-    return Array.from(this.messages.values())
-      .filter(m => m.chatId === chatId)
-      .sort((a, b) => a.timestamp - b.timestamp);
+    const msgs = this.db.prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY timestamp ASC').all(chatId) as any[];
+    return msgs.map(m => ({
+      id: m.id,
+      chatId: m.chat_id,
+      senderId: m.sender_id,
+      text: m.text,
+      timestamp: m.timestamp
+    }));
   }
-  // Contact Requests
 
+  // Contact Requests
   createContactRequest(id: string, senderId: string, receiverId: string): ContactRequest {
-    const req = { id, senderId, receiverId, status: 'pending' as const, timestamp: Date.now() };
-    this.contactRequests.set(id, req);
-    this.save();
-    return req;
+    this.db.prepare(
+      'INSERT INTO contact_requests (id, sender_id, receiver_id, status, timestamp) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, senderId, receiverId, 'pending', Date.now());
+    return { id, senderId, receiverId, status: 'pending', timestamp: Date.now() };
   }
 
   getPendingRequestsForUser(userId: string): ContactRequest[] {
-    return Array.from(this.contactRequests.values())
-      .filter(r => r.receiverId === userId && r.status === 'pending');
+    const reqs = this.db.prepare('SELECT * FROM contact_requests WHERE receiver_id = ? AND status = ?').all(userId, 'pending') as any[];
+    return reqs.map(r => ({
+      id: r.id,
+      senderId: r.sender_id,
+      receiverId: r.receiver_id,
+      status: r.status,
+      timestamp: r.timestamp
+    }));
+  }
+
+  getOutgoingPendingRequestsForUser(userId: string): ContactRequest[] {
+    const reqs = this.db.prepare('SELECT * FROM contact_requests WHERE sender_id = ? AND status = ?').all(userId, 'pending') as any[];
+    return reqs.map(r => ({
+      id: r.id,
+      senderId: r.sender_id,
+      receiverId: r.receiver_id,
+      status: r.status,
+      timestamp: r.timestamp
+    }));
   }
 
   acceptContactRequest(requestId: string): ContactRequest | null {
-    const req = this.contactRequests.get(requestId);
-    if (!req) return null;
-    req.status = 'accepted';
+    const row = this.db.prepare('SELECT * FROM contact_requests WHERE id = ?').get(requestId) as any;
+    if (!row) return null;
     
-    // Add to contacts
-    const sender = this.users.get(req.senderId);
-    const receiver = this.users.get(req.receiverId);
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('UPDATE contact_requests SET status = ? WHERE id = ?').run('accepted', requestId);
+      this.db.prepare('INSERT OR IGNORE INTO contacts (user_id, contact_id) VALUES (?, ?)').run(row.sender_id, row.receiver_id);
+      this.db.prepare('INSERT OR IGNORE INTO contacts (user_id, contact_id) VALUES (?, ?)').run(row.receiver_id, row.sender_id);
+    });
+    transaction();
     
-    if (sender && receiver) {
-      if (!sender.contacts) sender.contacts = [];
-      if (!receiver.contacts) receiver.contacts = [];
-      if (!sender.contacts.includes(receiver.id)) sender.contacts.push(receiver.id);
-      if (!receiver.contacts.includes(sender.id)) receiver.contacts.push(sender.id);
-    }
-    
-    this.save();
-    return req;
+    return {
+      id: row.id,
+      senderId: row.sender_id,
+      receiverId: row.receiver_id,
+      status: 'accepted',
+      timestamp: row.timestamp
+    };
   }
 
   rejectContactRequest(requestId: string): ContactRequest | null {
-    const req = this.contactRequests.get(requestId);
-    if (!req) return null;
-    req.status = 'rejected';
-    this.save();
-    return req;
+    const row = this.db.prepare('SELECT * FROM contact_requests WHERE id = ?').get(requestId) as any;
+    if (!row) return null;
+    this.db.prepare('UPDATE contact_requests SET status = ? WHERE id = ?').run('rejected', requestId);
+    
+    return {
+      id: row.id,
+      senderId: row.sender_id,
+      receiverId: row.receiver_id,
+      status: 'rejected',
+      timestamp: row.timestamp
+    };
   }
 
   getContactRequestBetween(user1: string, user2: string): ContactRequest | undefined {
-    return Array.from(this.contactRequests.values()).find(r => 
-      (r.senderId === user1 && r.receiverId === user2) ||
-      (r.senderId === user2 && r.receiverId === user1)
-    );
+    const row = this.db.prepare(`
+      SELECT * FROM contact_requests 
+      WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `).get(user1, user2, user2, user1) as any;
+    
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      senderId: row.sender_id,
+      receiverId: row.receiver_id,
+      status: row.status,
+      timestamp: row.timestamp
+    };
+  }
+
+  updateContactRequestStatus(requestId: string, status: string, senderId: string, receiverId: string) {
+    this.db.prepare('UPDATE contact_requests SET status = ?, sender_id = ?, receiver_id = ?, timestamp = ? WHERE id = ?')
+        .run(status, senderId, receiverId, Date.now(), requestId);
   }
 }
 

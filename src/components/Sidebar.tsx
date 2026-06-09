@@ -60,10 +60,20 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
       if (otherId && !usersCache[otherId]) {
         fetch(`/api/users/${otherId}`)
           .then(res => res.ok ? res.json() : null)
-          .then(user => user && addUserToCache(user));
+          .then(user => user && addUserToCache(user))
+          .catch(console.error);
       }
     });
-  }, [chats, currentUser?.id, usersCache, addUserToCache]);
+
+    currentUser?.contacts?.forEach(contactId => {
+      if (!usersCache[contactId]) {
+        fetch(`/api/users/${contactId}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(user => user && addUserToCache(user))
+          .catch(console.error);
+      }
+    });
+  }, [chats, currentUser?.contacts, currentUser?.id, usersCache, addUserToCache]);
 
   // Handle search overlay
   useEffect(() => {
@@ -157,7 +167,7 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
                         className="w-full text-left p-3 flex items-center gap-4 hover:bg-white/10 rounded-2xl transition-colors"
                     >
                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-400 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
-                            {user.username.charAt(0).toUpperCase()}
+                            {user.username?.charAt(0)?.toUpperCase() || '?'}
                         </div>
                         <div className="flex-1 min-w-0">
                             <p className="font-semibold text-white">@{user.username}</p>
@@ -196,7 +206,7 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
                      {({ isActive }) => (
                        <div className="flex w-full items-center">
                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center font-bold text-lg flex-shrink-0 mr-4">
-                             {otherUser ? otherUser.username.charAt(0).toUpperCase() : '?'}
+                             {otherUser?.username?.charAt(0)?.toUpperCase() || '?'}
                          </div>
                          <div className="flex-1 min-w-0">
                            <div className="flex justify-between items-baseline mb-0.5">
@@ -238,7 +248,7 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
                        return (
                            <div key={req.id} className="flex flex-col p-3 bg-white/10 rounded-2xl mb-2">
                                <div className="flex items-center gap-3">
-                                   <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center font-bold">{sender.username.charAt(0).toUpperCase()}</div>
+                                   <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center font-bold">{sender.username?.charAt(0)?.toUpperCase() || '?'}</div>
                                    <div className="flex-1"><p className="font-semibold text-white">@{sender.username}</p></div>
                                    <button onClick={() => acceptRequest(req.id)} className="p-2 bg-emerald-500 rounded-lg"><Check className="w-4 h-4"/></button>
                                </div>
@@ -252,14 +262,12 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
              {(currentUser?.contacts || []).map(contactId => {
                  const contact = usersCache[contactId];
                  if (!contact) {
-                    // Fetch if not cached
-                    fetch(`/api/users/${contactId}`).then(r=>r.json()).then(u=>addUserToCache(u));
                     return null;
                  }
                  return (
                     <button key={contact.id} onClick={() => startChat(contact)} className="w-full flex items-center p-3 hover:bg-white/10 rounded-2xl transition-colors">
                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-400 flex items-center justify-center font-bold text-lg flex-shrink-0 mr-4">
-                            {contact.username.charAt(0).toUpperCase()}
+                            {contact.username?.charAt(0)?.toUpperCase() || '?'}
                         </div>
                         <div className="flex-1 min-w-0 text-left">
                             <p className="font-semibold truncate text-white">@{contact.username}</p>
@@ -282,7 +290,7 @@ export default function Sidebar({ chats, onNewChat }: { chats: Chat[], onNewChat
       <div className="p-4 bg-white/5 border-t border-white/10 flex justify-between items-center z-20 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full border border-white/30 bg-white/10 flex items-center justify-center font-bold uppercase text-xs">
-            {currentUser?.username.charAt(0)}
+            {currentUser?.username?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div className="flex-1">
             <p className="text-xs text-white/40 leading-tight">Signed in as</p>

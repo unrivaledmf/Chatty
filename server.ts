@@ -86,12 +86,11 @@ app.post("/api/contacts/requests", (req, res) => {
   let existing = db.getContactRequestBetween(senderId, receiverId);
   if (existing) {
     if (existing.status === 'rejected') {
-      // Create new or update
+      db.updateContactRequestStatus(existing.id, 'pending', senderId, receiverId);
       existing.status = 'pending';
       existing.senderId = senderId;
       existing.receiverId = receiverId;
       existing.timestamp = Date.now();
-      db.save();
     }
   } else {
     existing = db.createContactRequest(uuidv4(), senderId, receiverId);
@@ -104,9 +103,7 @@ app.post("/api/contacts/requests", (req, res) => {
 
 app.get("/api/contacts/requests/pending/:userId", (req, res) => {
   const incoming = db.getPendingRequestsForUser(req.params.userId);
-  // Also get outgoing just in case
-  const outgoing = Array.from(db.contactRequests.values())
-    .filter(r => r.senderId === req.params.userId && r.status === 'pending');
+  const outgoing = db.getOutgoingPendingRequestsForUser(req.params.userId);
   res.json({ incoming, outgoing });
 });
 
@@ -144,9 +141,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("sendMessage", (payload) => {
-    const { chatId, senderId, text } = payload;
+    const { id, chatId, senderId, text } = payload;
     const msg = {
-      id: uuidv4(),
+      id: id || uuidv4(),
       chatId,
       senderId,
       text,
@@ -162,6 +159,14 @@ io.on("connection", (socket) => {
     if (chat) {
         chat.participants.forEach(pId => {
             io.to(`user:${pId}`).emit("chatUpdated", chat);
+            // Don't notify the sender themselves
+            if (pId !== senderId) {
+                io.to(`user:${pId}`).emit("userNotification", {
+                   chatId,
+                   senderId,
+                   text
+                });
+            }
         });
     }
   });
