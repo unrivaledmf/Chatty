@@ -1,0 +1,6 @@
+{
+  "name": "iMessage Clone",
+  "description": "Android-compatible real-time messaging application with unique usernames.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
